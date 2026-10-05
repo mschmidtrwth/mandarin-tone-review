@@ -11,6 +11,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,11 +22,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -59,6 +64,7 @@ import com.example.mandaring.data.ReferenceLibrary
 import com.example.mandaring.pitch.Overlay
 import com.example.mandaring.pitch.PitchRange
 import com.example.mandaring.pitch.Rating
+import com.example.mandaring.pitch.Session
 import com.example.mandaring.pitch.Word
 import com.example.mandaring.pitch.contour
 import com.example.mandaring.pitch.tones
@@ -84,17 +90,24 @@ fun RecordScreen(viewModel: RecordViewModel) {
         topBar = {
             TopAppBar(
                 title = {
-                    if (state.calibration == null) {
-                        ProfileMenu(state.profiles, viewModel::selectProfile, viewModel::addProfile)
-                    } else {
-                        Text(stringResource(R.string.calibration_title, state.profiles.current.name))
+                    when {
+                        state.calibration != null ->
+                            Text(stringResource(R.string.calibration_title, state.profiles.current.name))
+                        state.training != null -> Text(stringResource(R.string.train_title))
+                        else -> ProfileMenu(state.profiles, viewModel::selectProfile, viewModel::addProfile)
                     }
                 },
                 actions = {
                     if (state.calibration == null) {
-                        TextButton(onClick = viewModel::startCalibration) {
-                            Text(stringResource(R.string.action_calibrate))
+                        if (state.training == null) {
+                            TextButton(onClick = viewModel::openTraining) {
+                                Text(stringResource(R.string.action_train))
+                            }
+                            TextButton(onClick = viewModel::startCalibration) {
+                                Text(stringResource(R.string.action_calibrate))
+                            }
                         }
+                        OptionsMenu(state.keepRecordings, viewModel::setKeepRecordings)
                     }
                 },
             )
@@ -119,6 +132,23 @@ fun RecordScreen(viewModel: RecordViewModel) {
                     onSave = viewModel::saveCalibration,
                     onRedo = viewModel::startCalibration,
                     onCancel = viewModel::cancelCalibration,
+                )
+            } else if (state.training != null) {
+                BackHandler(onBack = viewModel::closeTraining)
+                TrainingPanel(
+                    state = state,
+                    training = state.training,
+                    onPress = onPress,
+                    onRelease = viewModel::stopRecording,
+                    onToggleTone = viewModel::toggleTrainingTone,
+                    onStart = viewModel::startTraining,
+                    onNext = { viewModel.nextTrainingWord() },
+                    onSkip = { viewModel.nextTrainingWord(skip = true) },
+                    onSaveRecording = viewModel::saveCurrent,
+                    onTogglePlayback = viewModel::togglePlayback,
+                    onToggleReferencePlayback = viewModel::toggleReferencePlayback,
+                    onRestart = viewModel::openTraining,
+                    onClose = viewModel::closeTraining,
                 )
             } else {
                 ReferencePicker(state.library, state.reference, viewModel::selectReference)
@@ -146,6 +176,7 @@ fun RecordScreen(viewModel: RecordViewModel) {
                 state.message?.let {
                     Text(stringResource(it), color = MaterialTheme.colorScheme.error)
                 }
+                SaveRecordingButton(state.current, viewModel::saveCurrent)
                 TakeList(
                     takes = state.takes,
                     selected = state.current?.file,
@@ -155,6 +186,130 @@ fun RecordScreen(viewModel: RecordViewModel) {
                 )
             }
         }
+    }
+}
+
+/** Offers to keep the take on show if it has not been kept. */
+@Composable
+private fun SaveRecordingButton(take: Take?, onSave: () -> Unit) {
+    if (take == null || take.file != null) return
+    OutlinedButton(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.action_save_recording))
+    }
+}
+
+@Composable
+private fun OptionsMenu(keepRecordings: Boolean, onKeepRecordings: (Boolean) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) { Text("⋮", style = MaterialTheme.typography.titleLarge) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.option_keep_recordings)) },
+                trailingIcon = { Checkbox(checked = keepRecordings, onCheckedChange = null) },
+                onClick = { onKeepRecordings(!keepRecordings) },
+            )
+        }
+    }
+}
+
+/** Setting up, working through and summing up a drill. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TrainingPanel(
+    state: RecordUiState,
+    training: TrainingState,
+    onPress: () -> Unit,
+    onRelease: () -> Unit,
+    onToggleTone: (String) -> Unit,
+    onStart: () -> Unit,
+    onNext: () -> Unit,
+    onSkip: () -> Unit,
+    onSaveRecording: () -> Unit,
+    onTogglePlayback: () -> Unit,
+    onToggleReferencePlayback: () -> Unit,
+    onRestart: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val session = training.session
+    val range = state.profiles.current.range
+    if (session == null) {
+        val patterns = remember(state.library) {
+            state.library?.items.orEmpty().map { tonePattern(it.word) }.distinct()
+                .sortedWith(compareBy({ it.length }, { it }))
+        }
+        Text(stringResource(R.string.train_choose), style = MaterialTheme.typography.titleMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (pattern in patterns) {
+                FilterChip(
+                    selected = pattern in training.tones,
+                    onClick = { onToggleTone(pattern) },
+                    label = { Text(pattern) },
+                )
+            }
+        }
+        if (range == null) {
+            Text(stringResource(R.string.train_calibrate_first), color = MaterialTheme.colorScheme.error)
+        }
+        Button(onClick = onStart, enabled = range != null && state.library != null, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.action_start))
+        }
+    } else if (session.done) {
+        SessionSummary(session, onRestart, onClose)
+    } else {
+        val reference = state.reference ?: return
+        Text(
+            stringResource(R.string.train_progress, session.position + 1, session.queue.size),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LinearProgressIndicator(
+            progress = { session.position.toFloat() / session.queue.size },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(reference.word.pinyin, style = MaterialTheme.typography.headlineMedium)
+        PracticePanel(
+            reference = reference,
+            take = state.current,
+            range = range,
+            recording = state.recording,
+            playbackMs = state.playbackMs,
+            referencePlaybackMs = state.referencePlaybackMs,
+            onTogglePlayback = onTogglePlayback,
+            onToggleReferencePlayback = onToggleReferencePlayback,
+        )
+        RecordButton(state.recording, onPress, onRelease)
+        state.message?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
+        SaveRecordingButton(state.current, onSaveRecording)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onSkip, modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.action_skip))
+            }
+            Button(onClick = onNext, enabled = training.rating != null, modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.action_next))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionSummary(session: Session, onRestart: () -> Unit, onClose: () -> Unit) {
+    Text(stringResource(R.string.train_finished), style = MaterialTheme.typography.headlineSmall)
+    Text(
+        stringResource(R.string.train_summary, session.passed, session.queue.distinct().size),
+        style = MaterialTheme.typography.titleMedium,
+    )
+    if (session.missed.isNotEmpty()) {
+        Text(
+            stringResource(
+                R.string.train_missed,
+                session.missed.joinToString(", ") { Word.parse(it)?.pinyin ?: it },
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Button(onClick = onRestart) { Text(stringResource(R.string.train_again)) }
+        TextButton(onClick = onClose) { Text(stringResource(R.string.action_done)) }
     }
 }
 
@@ -295,9 +450,37 @@ private fun ReferencePicker(library: ReferenceLibrary?, selected: Reference?, on
                 )
             }
 
+            var query by rememberSaveable { mutableStateOf("") }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text(stringResource(R.string.reference_search)) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+            )
+            // Grouped by tone pattern, which a search flattens.
+            val groups = remember(library, query) {
+                val needle = query.trim().lowercase()
+                library.items
+                    .filter { needle.isEmpty() || needle in it.name || needle in it.word.pinyin.lowercase() }
+                    .groupBy { tonePattern(it.word) }
+                    .toSortedMap(compareBy({ it.length }, { it }))
+            }
             LazyColumn(Modifier.weight(1f, fill = false)) {
-                item { Choice(stringResource(R.string.reference_none), null) }
-                items(library.items, key = { it.name }) { Choice(it.word.pinyin, it) }
+                if (query.isBlank()) item { Choice(stringResource(R.string.reference_none), null) }
+                for ((pattern, references) in groups) {
+                    item(key = "header-$pattern") {
+                        Text(
+                            pattern,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                        )
+                    }
+                    items(references, key = { it.name }) { Choice(it.word.pinyin, it) }
+                }
             }
             HorizontalDivider()
             Text(

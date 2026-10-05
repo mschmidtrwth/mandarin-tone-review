@@ -39,4 +39,20 @@
     <string name="heard_tones">Heard:</string>
     <string name="error_microphone">Could not open the microphone</string>
     <string name="error_unreadable">Could not read that recording</string>
+    <string name="action_train">Train</string>
+    <string name="action_start">Start</string>
+    <string name="action_next">Next</string>
+    <string name="action_skip">Skip</string>
+    <string name="action_done">Done</string>
+    <string name="action_save_recording">Save this recording</string>
+    <string name="option_keep_recordings">Keep every recording</string>
+    <string name="train_title">Training</string>
+    <string name="train_choose">Which tones to drill? None selected means all.</string>
+    <string name="train_calibrate_first">Calibrate first, so your attempts can be compared with the references</string>
+    <string name="train_progress">Word %1$d of %2$d</string>
+    <string name="train_finished">Session finished</string>
+    <string name="train_summary">Passed %1$d of %2$d words</string>
+    <string name="train_missed">To work on: %1$s</string>
+    <string name="train_again">Train again</string>
+    <string name="reference_search">Search pinyin</string>
 </resources>
