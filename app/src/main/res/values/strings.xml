@@ -36,6 +36,7 @@
     <string name="rating_close">Close match</string>
     <string name="rating_near">Getting there</string>
     <string name="rating_off">Quite different</string>
+    <string name="heard_tones">Heard:</string>
     <string name="error_microphone">Could not open the microphone</string>
     <string name="error_unreadable">Could not read that recording</string>
 </resources>

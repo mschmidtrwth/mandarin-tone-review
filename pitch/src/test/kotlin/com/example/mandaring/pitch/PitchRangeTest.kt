@@ -74,5 +74,5 @@ class PitchRangeTest {
         assertEquals(0, PitchHistogram.decode("garbage,9999:5,3:x").voicedFrames)
     }
 
-    private fun track(f0: FloatArray) = PitchTrack(hopMs = 10f, f0 = f0, confidence = FloatArray(f0.size))
+    private fun track(f0: FloatArray) = PitchTrack(hopMs = 10f, f0 = f0, confidence = FloatArray(f0.size), levelDb = FloatArray(f0.size))
 }

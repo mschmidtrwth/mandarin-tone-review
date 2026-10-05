@@ -28,10 +28,19 @@ data class Syllable(val letters: String, val tone: Int) {
     }
 }
 
-/** A word or phrase as spoken, so with tone sandhi already applied (`bu2cuo4`, not `bu4cuo4`). */
+/**
+ * A word or phrase. The changed tones of 不 and 一 are written as spoken (`bu2cuo4`, not `bu4cuo4`),
+ * third tones as in the dictionary (`hao3dong3`).
+ */
 data class Word(val syllables: List<Syllable>) {
     /** E.g. `ān jìng`. */
     val pinyin: String get() = syllables.joinToString(" ") { it.pinyin }
+
+    /** The tone of each syllable as it is said: a third tone before another third tone becomes a second. */
+    val spokenTones: List<Int>
+        get() = syllables.mapIndexed { index, syllable ->
+            if (syllable.tone == 3 && syllables.getOrNull(index + 1)?.tone == 3) 2 else syllable.tone
+        }
 
     companion object {
         private val SYLLABLE = Regex("([a-zü]+)([0-5])")

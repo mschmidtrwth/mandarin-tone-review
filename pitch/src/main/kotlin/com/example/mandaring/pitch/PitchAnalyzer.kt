@@ -70,7 +70,7 @@ class PitchAnalyzer(
             if (candidateCount[i] > 0) (1f - aperiodicity[i][candidate]).coerceIn(0f, 1f) else 0f
         }
         dropShortRuns(f0)
-        return PitchTrack(config.hopMs, medianFilter(f0), confidence)
+        return PitchTrack(config.hopMs, medianFilter(f0), confidence, levelDb)
     }
 
     private fun copyCentred(samples: FloatArray, centre: Int, into: FloatArray) {

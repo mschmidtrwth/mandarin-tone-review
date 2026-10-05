@@ -47,6 +47,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.mandaring.R
@@ -56,7 +59,9 @@ import com.example.mandaring.data.ReferenceLibrary
 import com.example.mandaring.pitch.Overlay
 import com.example.mandaring.pitch.PitchRange
 import com.example.mandaring.pitch.Rating
+import com.example.mandaring.pitch.Word
 import com.example.mandaring.pitch.contour
+import com.example.mandaring.pitch.tones
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -321,6 +326,9 @@ private fun PracticePanel(
     val overlay = remember(reference, take, range) {
         if (take != null && range != null) Overlay.of(reference.contour, take.track.contour(range)) else null
     }
+    val heard = remember(reference, take, range) {
+        if (take != null && range != null) take.track.tones(range, reference.word.syllables.size) else null
+    }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ChartFrame {
@@ -356,7 +364,27 @@ private fun PracticePanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (heard != null) HeardTones(reference.word, heard)
     }
+}
+
+/** [word] written with the tones [heard] in a take; syllables whose tone is not the word's stand out. */
+@Composable
+private fun HeardTones(word: Word, heard: List<Int>) {
+    val label = stringResource(R.string.heard_tones)
+    val wrong = SpanStyle(color = MaterialTheme.colorScheme.error)
+    val expected = word.spokenTones
+    Text(
+        buildAnnotatedString {
+            append(label)
+            word.syllables.forEachIndexed { index, syllable ->
+                append(' ')
+                val pinyin = syllable.copy(tone = heard[index]).pinyin
+                if (heard[index] == expected[index]) append(pinyin) else withStyle(wrong) { append(pinyin) }
+            }
+        },
+        style = MaterialTheme.typography.titleMedium,
+    )
 }
 
 @Composable

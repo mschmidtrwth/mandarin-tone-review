@@ -44,6 +44,14 @@ class WordTest {
     }
 
     @Test
+    fun thirdToneBeforeThirdToneIsSpokenAsSecond() {
+        assertEquals(listOf(2, 3), Word.parse("hao3dong3")!!.spokenTones)
+        assertEquals(listOf(2, 2, 3), Word.parse("zhan3lan3guan3")!!.spokenTones)
+        assertEquals(listOf(3, 1), Word.parse("hao3chi1")!!.spokenTones)
+        assertEquals(listOf(4, 0), Word.parse("ke4qi0")!!.spokenTones)
+    }
+
+    @Test
     fun everySampleNameIsAWord() {
         for (name in Fixtures.sampleNames) {
             assertNotNull(name, Word.parse(name))
