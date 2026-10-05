@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">Mandarin Tone Visualizer</string>
+    <string name="default_profile_name">Me</string>
     <string name="hint_empty">Hold the button and say a word</string>
     <string name="hint_hold">Keep holding the button while you speak</string>
     <string name="hint_no_pitch">No pitch detected in this recording</string>
@@ -8,7 +9,23 @@
     <string name="action_play">Play</string>
     <string name="action_stop">Stop</string>
     <string name="action_delete">Delete</string>
+    <string name="action_calibrate">Calibrate</string>
+    <string name="action_new_profile">New profile</string>
+    <string name="action_add">Add</string>
+    <string name="action_save">Save</string>
+    <string name="action_redo">Redo</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="profile_name">Name</string>
     <string name="duration_seconds">%1$.1f s</string>
+    <string name="range_hz">Range %1$d–%2$d Hz</string>
+    <string name="range_unknown">Range not calibrated yet</string>
+    <string name="calibration_title">Calibrate %1$s</string>
+    <string name="calibration_step">Step %1$d of %2$d</string>
+    <string name="calibration_low">Hum a steady note at the bottom of your comfortable speaking range for two seconds</string>
+    <string name="calibration_high">Hum a steady note at the top of your comfortable speaking range for two seconds</string>
+    <string name="calibration_speech">Say a full sentence in your normal voice, in any language</string>
+    <string name="calibration_retry">Didn\'t catch enough of that, try again a little longer</string>
+    <string name="calibration_too_narrow">The low and high notes were too close together</string>
     <string name="error_microphone">Could not open the microphone</string>
     <string name="error_unreadable">Could not read that recording</string>
 </resources>

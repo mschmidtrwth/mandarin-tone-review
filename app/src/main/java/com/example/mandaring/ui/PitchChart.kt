@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -13,6 +14,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import com.example.mandaring.pitch.PitchRange
 import com.example.mandaring.pitch.PitchTrack
 import kotlin.math.ln
 import kotlin.math.max
@@ -26,30 +28,57 @@ private val GRID_HZ = listOf(60f, 80f, 100f, 125f, 150f, 200f, 250f, 300f, 400f,
 /** The chart never zooms in further than this, so a flat tone does not look dramatic. */
 private const val MIN_SPAN_OCTAVES = 1f
 
-/** Pitch over time on a logarithmic frequency axis, with gaps where the voice is unvoiced. */
+/** With a speaker range, the chart shows the five tone levels plus half a level either side. */
+private const val LOWEST_LEVEL = 0.5f
+private const val HIGHEST_LEVEL = 5.5f
+
+/**
+ * Pitch over time on a logarithmic frequency axis, with gaps where the voice is unvoiced.
+ *
+ * With a [range] the axis is the speaker's five tone levels, drawn as bands, and pitch outside
+ * them is held at the edge of the chart. Without one the axis is in Hz, fitted to the track.
+ */
 @Composable
-fun PitchChart(track: PitchTrack, cursorMs: Float?, modifier: Modifier = Modifier) {
+fun PitchChart(track: PitchTrack, range: PitchRange?, cursorMs: Float?, modifier: Modifier = Modifier) {
     val lineColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val bandColor = MaterialTheme.colorScheme.surfaceContainerHighest
     val cursorColor = MaterialTheme.colorScheme.tertiary
     val labelStyle = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
     val textMeasurer = rememberTextMeasurer()
-    val range = remember(track) { visibleRange(track) }
+    val bounds = remember(track, range) {
+        if (range != null) range.hz(LOWEST_LEVEL) to range.hz(HIGHEST_LEVEL) else fittedBounds(track)
+    }
 
     Canvas(modifier) {
-        val labelWidth = 36.dp.toPx()
+        val labelWidth = (if (range != null) 20.dp else 36.dp).toPx()
         val plotWidth = size.width - labelWidth
-        val (low, high) = range
+        val (low, high) = bounds
 
         fun x(timeMs: Float) = labelWidth + plotWidth * timeMs / track.durationMs
         fun y(hz: Float) = size.height * (1f - ln(hz / low) / ln(high / low))
 
-        for (hz in GRID_HZ) {
-            if (hz < low || hz > high) continue
-            drawLine(gridColor, Offset(labelWidth, y(hz)), Offset(size.width, y(hz)), strokeWidth = 1.dp.toPx())
-            val label = textMeasurer.measure(hz.toInt().toString(), labelStyle)
-            val top = (y(hz) - label.size.height / 2f).coerceIn(0f, size.height - label.size.height)
-            drawText(label, topLeft = Offset(0f, top))
+        fun label(text: String, hz: Float) {
+            val layout = textMeasurer.measure(text, labelStyle)
+            val top = (y(hz) - layout.size.height / 2f).coerceIn(0f, size.height - layout.size.height)
+            drawText(layout, topLeft = Offset(0f, top))
+        }
+
+        if (range != null) {
+            for (level in 1..5) {
+                val top = y(range.hz(level + 0.5f))
+                val bottom = y(range.hz(level - 0.5f))
+                if (level % 2 == 1) {
+                    drawRect(bandColor, Offset(labelWidth, top), Size(plotWidth, bottom - top))
+                }
+                label(level.toString(), range.hz(level.toFloat()))
+            }
+        } else {
+            for (hz in GRID_HZ) {
+                if (hz < low || hz > high) continue
+                drawLine(gridColor, Offset(labelWidth, y(hz)), Offset(size.width, y(hz)), strokeWidth = 1.dp.toPx())
+                label(hz.toInt().toString(), hz)
+            }
         }
 
         val path = Path()
@@ -60,7 +89,7 @@ fun PitchChart(track: PitchTrack, cursorMs: Float?, modifier: Modifier = Modifie
                 continue
             }
             val px = x(i * track.hopMs)
-            val py = y(track.f0[i])
+            val py = y(track.f0[i].coerceIn(low, high))
             if (penDown) path.lineTo(px, py) else path.moveTo(px, py)
             penDown = true
         }
@@ -76,8 +105,8 @@ fun PitchChart(track: PitchTrack, cursorMs: Float?, modifier: Modifier = Modifie
     }
 }
 
-/** Lowest and highest frequency to show: the voiced range with some headroom. */
-private fun visibleRange(track: PitchTrack): Pair<Float, Float> {
+/** Lowest and highest frequency to show: the voiced range of the track with some headroom. */
+private fun fittedBounds(track: PitchTrack): Pair<Float, Float> {
     var low = Float.MAX_VALUE
     var high = 0f
     for (i in 0 until track.size) {

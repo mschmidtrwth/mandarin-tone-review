@@ -19,8 +19,6 @@ class TakeStore(private val directory: File) {
         return File(directory, "$name.wav").also { WavIo.write(it, audio) }
     }
 
-    fun load(file: File): Audio = WavIo.read(file)
-
     fun delete(file: File) {
         file.delete()
     }

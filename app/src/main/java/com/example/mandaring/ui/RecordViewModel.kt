@@ -13,10 +13,15 @@ import androidx.lifecycle.viewModelScope
 import com.example.mandaring.R
 import com.example.mandaring.audio.Player
 import com.example.mandaring.audio.Recorder
+import com.example.mandaring.data.ProfileStore
+import com.example.mandaring.data.Profiles
 import com.example.mandaring.data.TakeStore
 import com.example.mandaring.pitch.Audio
 import com.example.mandaring.pitch.PitchAnalyzer
+import com.example.mandaring.pitch.PitchHistogram
+import com.example.mandaring.pitch.PitchRange
 import com.example.mandaring.pitch.PitchTrack
+import com.example.mandaring.pitch.WavIo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -27,26 +32,49 @@ import java.io.IOException
 /** A recording together with its analysis. */
 class Take(val file: File, val audio: Audio, val track: PitchTrack)
 
+/** What the speaker is asked to record, in order, to establish their range. */
+enum class CalibrationStep(@param:StringRes val prompt: Int) {
+    LOW(R.string.calibration_low),
+    HIGH(R.string.calibration_high),
+    SPEECH(R.string.calibration_speech),
+}
+
+/** Progress through calibration: [step] recordings are done and pooled in [histogram]. */
+data class CalibrationState(val step: Int = 0, val histogram: PitchHistogram = PitchHistogram()) {
+    val current: CalibrationStep? get() = CalibrationStep.entries.getOrNull(step)
+    val range: PitchRange? get() = histogram.range()
+}
+
 data class RecordUiState(
+    val profiles: Profiles,
     val recording: Boolean = false,
     val current: Take? = null,
     val takes: List<File> = emptyList(),
     /** Playback position within the current take, null when not playing. */
     val playbackMs: Float? = null,
+    /** Non-null while the calibration flow is open. */
+    val calibration: CalibrationState? = null,
     @param:StringRes val message: Int? = null,
 )
 
 class RecordViewModel(application: Application) : AndroidViewModel(application) {
-    private val store = TakeStore(File(application.filesDir, "takes"))
+    private val profileStore = ProfileStore(File(application.filesDir, "profiles.json"))
     private val recorder = Recorder(application)
     private val player = Player()
 
-    var state by mutableStateOf(RecordUiState(takes = store.list()))
+    var state by mutableStateOf(
+        profileStore.load(application.getString(R.string.default_profile_name)).let {
+            RecordUiState(profiles = it, takes = takeStore(it).list())
+        },
+    )
         private set
 
     @Volatile
     private var stopRequested = false
     private var playback: Job? = null
+
+    private fun takeStore(profiles: Profiles = state.profiles) =
+        TakeStore(File(getApplication<Application>().filesDir, "takes/${profiles.currentId}"))
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun startRecording() {
@@ -62,10 +90,8 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
             when {
                 audio == null -> state = state.copy(message = R.string.error_microphone)
                 audio.durationMs < MIN_TAKE_MS -> state = state.copy(message = R.string.hint_hold)
-                else -> {
-                    val take = withContext(Dispatchers.Default) { analyze(store.save(audio), audio) }
-                    state = state.copy(current = take, takes = store.list())
-                }
+                state.calibration != null -> addCalibrationRecording(audio)
+                else -> addTake(audio)
             }
         }
     }
@@ -74,12 +100,70 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
         stopRequested = true
     }
 
+    private suspend fun addTake(audio: Audio) {
+        val store = takeStore()
+        val take = withContext(Dispatchers.Default) { analyze(store.save(audio), audio) }
+        // Every take refines the speaker's range a little.
+        val profile = state.profiles.current
+        updateProfiles(state.profiles.withCurrent(profile.copy(histogram = profile.histogram + take.track)))
+        state = state.copy(current = take, takes = store.list())
+    }
+
+    private suspend fun addCalibrationRecording(audio: Audio) {
+        val track = withContext(Dispatchers.Default) { PitchAnalyzer(audio.sampleRate).analyze(audio.samples) }
+        val calibration = state.calibration ?: return
+        state = if (track.voicedFrames < MIN_CALIBRATION_FRAMES) {
+            state.copy(message = R.string.calibration_retry)
+        } else {
+            state.copy(calibration = CalibrationState(calibration.step + 1, calibration.histogram + track))
+        }
+    }
+
+    fun startCalibration() {
+        stopPlayback()
+        state = state.copy(calibration = CalibrationState(), message = null)
+    }
+
+    fun cancelCalibration() {
+        stopRecording()
+        state = state.copy(calibration = null, message = null)
+    }
+
+    /** Replaces what was known about the current speaker's range with the calibration recordings. */
+    fun saveCalibration() {
+        val calibration = state.calibration ?: return
+        if (calibration.range == null) return
+        updateProfiles(state.profiles.withCurrent(state.profiles.current.copy(histogram = calibration.histogram)))
+        state = state.copy(calibration = null, message = null)
+    }
+
+    fun selectProfile(id: String) {
+        if (id == state.profiles.currentId) return
+        switchTo(state.profiles.copy(currentId = id))
+    }
+
+    fun addProfile(name: String) {
+        if (name.isBlank()) return
+        switchTo(state.profiles.adding(name.trim()))
+    }
+
+    private fun switchTo(profiles: Profiles) {
+        stopPlayback()
+        updateProfiles(profiles)
+        state = state.copy(current = null, takes = takeStore().list(), message = null)
+    }
+
+    private fun updateProfiles(profiles: Profiles) {
+        state = state.copy(profiles = profiles)
+        profileStore.save(profiles)
+    }
+
     fun select(file: File) {
         stopPlayback()
         viewModelScope.launch {
             val take = withContext(Dispatchers.Default) {
                 try {
-                    analyze(file, store.load(file))
+                    analyze(file, WavIo.read(file))
                 } catch (e: IOException) {
                     Log.w(TAG, "Could not read $file", e)
                     null
@@ -95,6 +179,7 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
 
     fun delete(file: File) {
         if (state.current?.file == file) stopPlayback()
+        val store = takeStore()
         store.delete(file)
         state = state.copy(
             current = state.current?.takeIf { it.file != file },
@@ -129,5 +214,8 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
         const val TAG = "RecordViewModel"
         const val MAX_TAKE_MS = 10_000
         const val MIN_TAKE_MS = 200f
+
+        /** Half a second of voiced sound, the least a calibration recording must contain. */
+        const val MIN_CALIBRATION_FRAMES = 50
     }
 }

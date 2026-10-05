@@ -22,5 +22,5 @@ class PitchTrack(
 
     fun isVoiced(frame: Int): Boolean = !f0[frame].isNaN()
 
-    val hasVoicedFrames: Boolean get() = f0.any { !it.isNaN() }
+    val voicedFrames: Int get() = f0.count { !it.isNaN() }
 }
