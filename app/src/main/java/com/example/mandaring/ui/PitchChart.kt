@@ -7,13 +7,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.mandaring.pitch.Contour
 import com.example.mandaring.pitch.PitchRange
 import com.example.mandaring.pitch.PitchTrack
 import kotlin.math.ln
@@ -31,6 +37,9 @@ private const val MIN_SPAN_OCTAVES = 1f
 /** With a speaker range, the chart shows the five tone levels plus half a level either side. */
 private const val LOWEST_LEVEL = 0.5f
 private const val HIGHEST_LEVEL = 5.5f
+
+private val LEVEL_LABEL_WIDTH = 20.dp
+private val HZ_LABEL_WIDTH = 36.dp
 
 /**
  * Pitch over time on a logarithmic frequency axis, with gaps where the voice is unvoiced.
@@ -51,58 +60,109 @@ fun PitchChart(track: PitchTrack, range: PitchRange?, cursorMs: Float?, modifier
     }
 
     Canvas(modifier) {
-        val labelWidth = (if (range != null) 20.dp else 36.dp).toPx()
+        val labelWidth = (if (range != null) LEVEL_LABEL_WIDTH else HZ_LABEL_WIDTH).toPx()
         val plotWidth = size.width - labelWidth
         val (low, high) = bounds
 
         fun x(timeMs: Float) = labelWidth + plotWidth * timeMs / track.durationMs
         fun y(hz: Float) = size.height * (1f - ln(hz / low) / ln(high / low))
 
-        fun label(text: String, hz: Float) {
-            val layout = textMeasurer.measure(text, labelStyle)
-            val top = (y(hz) - layout.size.height / 2f).coerceIn(0f, size.height - layout.size.height)
-            drawText(layout, topLeft = Offset(0f, top))
-        }
-
         if (range != null) {
-            for (level in 1..5) {
-                val top = y(range.hz(level + 0.5f))
-                val bottom = y(range.hz(level - 0.5f))
-                if (level % 2 == 1) {
-                    drawRect(bandColor, Offset(labelWidth, top), Size(plotWidth, bottom - top))
-                }
-                label(level.toString(), range.hz(level.toFloat()))
-            }
+            drawLevelBands(labelWidth, bandColor, textMeasurer, labelStyle) { y(range.hz(it)) }
         } else {
             for (hz in GRID_HZ) {
                 if (hz < low || hz > high) continue
                 drawLine(gridColor, Offset(labelWidth, y(hz)), Offset(size.width, y(hz)), strokeWidth = 1.dp.toPx())
-                label(hz.toInt().toString(), hz)
+                drawAxisLabel(hz.toInt().toString(), y(hz), textMeasurer, labelStyle)
             }
         }
 
-        val path = Path()
-        var penDown = false
-        for (i in 0 until track.size) {
-            if (!track.isVoiced(i)) {
-                penDown = false
-                continue
-            }
-            val px = x(i * track.hopMs)
-            val py = y(track.f0[i].coerceIn(low, high))
-            if (penDown) path.lineTo(px, py) else path.moveTo(px, py)
-            penDown = true
+        drawCurve(track.size, lineColor, 4.dp) { i ->
+            if (track.isVoiced(i)) Offset(x(i * track.hopMs), y(track.f0[i].coerceIn(low, high))) else null
         }
-        drawPath(
-            path,
-            lineColor,
-            style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-        )
 
         if (cursorMs != null) {
             drawLine(cursorColor, Offset(x(cursorMs), 0f), Offset(x(cursorMs), size.height), strokeWidth = 2.dp.toPx())
         }
     }
+}
+
+/**
+ * An attempt drawn over the faded contour of the [reference] it imitates, on the five tone
+ * levels. Both are on the frames of [reference], as is [cursorMs].
+ */
+@Composable
+fun OverlayChart(reference: Contour, attempt: Contour?, cursorMs: Float?, modifier: Modifier = Modifier) {
+    val lineColor = MaterialTheme.colorScheme.primary
+    val ghostColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+    val bandColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    val cursorColor = MaterialTheme.colorScheme.tertiary
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val textMeasurer = rememberTextMeasurer()
+
+    Canvas(modifier) {
+        val labelWidth = LEVEL_LABEL_WIDTH.toPx()
+        val plotWidth = size.width - labelWidth
+
+        fun x(timeMs: Float) = labelWidth + plotWidth * timeMs / reference.durationMs
+        fun y(level: Float) = size.height * (HIGHEST_LEVEL - level) / (HIGHEST_LEVEL - LOWEST_LEVEL)
+        fun point(contour: Contour, frame: Int) = if (contour.isVoiced(frame)) {
+            Offset(x(frame * contour.hopMs), y(contour.levels[frame].coerceIn(LOWEST_LEVEL, HIGHEST_LEVEL)))
+        } else {
+            null
+        }
+
+        drawLevelBands(labelWidth, bandColor, textMeasurer, labelStyle) { y(it) }
+        drawCurve(reference.size, ghostColor, 12.dp) { point(reference, it) }
+        if (attempt != null) {
+            drawCurve(attempt.size, lineColor, 4.dp) { point(attempt, it) }
+        }
+
+        // An attempt's silence before and after speaking falls outside the reference's time span.
+        if (cursorMs != null && cursorMs in 0f..reference.durationMs) {
+            drawLine(cursorColor, Offset(x(cursorMs), 0f), Offset(x(cursorMs), size.height), strokeWidth = 2.dp.toPx())
+        }
+    }
+}
+
+/** Shades every other tone level and numbers all five, to the right of [labelWidth]. */
+private fun DrawScope.drawLevelBands(
+    labelWidth: Float,
+    bandColor: Color,
+    textMeasurer: TextMeasurer,
+    labelStyle: TextStyle,
+    y: (level: Float) -> Float,
+) {
+    for (level in 1..5) {
+        val top = y(level + 0.5f)
+        val bottom = y(level - 0.5f)
+        if (level % 2 == 1) {
+            drawRect(bandColor, Offset(labelWidth, top), Size(size.width - labelWidth, bottom - top))
+        }
+        drawAxisLabel(level.toString(), y(level.toFloat()), textMeasurer, labelStyle)
+    }
+}
+
+private fun DrawScope.drawAxisLabel(text: String, y: Float, textMeasurer: TextMeasurer, style: TextStyle) {
+    val layout = textMeasurer.measure(text, style)
+    val top = (y - layout.size.height / 2f).coerceIn(0f, size.height - layout.size.height)
+    drawText(layout, topLeft = Offset(0f, top))
+}
+
+/** Joins the points of consecutive frames, lifting the pen where [point] is null. */
+private fun DrawScope.drawCurve(frames: Int, color: Color, width: Dp, point: (frame: Int) -> Offset?) {
+    val path = Path()
+    var penDown = false
+    for (i in 0 until frames) {
+        val offset = point(i)
+        if (offset == null) {
+            penDown = false
+            continue
+        }
+        if (penDown) path.lineTo(offset.x, offset.y) else path.moveTo(offset.x, offset.y)
+        penDown = true
+    }
+    drawPath(path, color, style = Stroke(width = width.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
 /** Lowest and highest frequency to show: the voiced range of the track with some headroom. */

@@ -26,6 +26,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        showDebugWav(intent)
+    }
+
     /**
      * Debug builds only: shows a WAV placed in the app's `files/debug` directory, so the analysis
      * can be checked on the device with known audio. See tools/show_sample.sh.

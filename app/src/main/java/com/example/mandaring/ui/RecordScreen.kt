@@ -26,12 +26,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,7 +51,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.mandaring.R
 import com.example.mandaring.data.Profiles
+import com.example.mandaring.data.Reference
+import com.example.mandaring.data.ReferenceLibrary
+import com.example.mandaring.pitch.Overlay
 import com.example.mandaring.pitch.PitchRange
+import com.example.mandaring.pitch.Rating
+import com.example.mandaring.pitch.contour
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -108,12 +116,27 @@ fun RecordScreen(viewModel: RecordViewModel) {
                     onCancel = viewModel::cancelCalibration,
                 )
             } else {
-                ChartPanel(
-                    take = state.current,
-                    range = state.profiles.current.range,
-                    playbackMs = state.playbackMs,
-                    onTogglePlayback = viewModel::togglePlayback,
-                )
+                ReferencePicker(state.library, state.reference, viewModel::selectReference)
+                val reference = state.reference
+                if (reference == null) {
+                    ChartPanel(
+                        take = state.current,
+                        range = state.profiles.current.range,
+                        playbackMs = state.playbackMs,
+                        onTogglePlayback = viewModel::togglePlayback,
+                    )
+                } else {
+                    PracticePanel(
+                        reference = reference,
+                        take = state.current,
+                        range = state.profiles.current.range,
+                        recording = state.recording,
+                        playbackMs = state.playbackMs,
+                        referencePlaybackMs = state.referencePlaybackMs,
+                        onTogglePlayback = viewModel::togglePlayback,
+                        onToggleReferencePlayback = viewModel::toggleReferencePlayback,
+                    )
+                }
                 RecordButton(state.recording, onPress, onRelease = viewModel::stopRecording)
                 state.message?.let {
                     Text(stringResource(it), color = MaterialTheme.colorScheme.error)
@@ -228,6 +251,126 @@ private fun CalibrationPanel(
 private fun rangeText(range: PitchRange) =
     stringResource(R.string.range_hz, range.lowHz.roundToInt(), range.highHz.roundToInt())
 
+/** Chooses the word to practise from a sheet listing the [library], which also credits its source. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReferencePicker(library: ReferenceLibrary?, selected: Reference?, onSelect: (Reference?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+
+    OutlinedButton(onClick = { open = true }, enabled = library != null, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            when {
+                library == null -> stringResource(R.string.reference_loading)
+                selected == null -> stringResource(R.string.reference_choose)
+                else -> selected.word.pinyin
+            },
+            style = MaterialTheme.typography.titleMedium,
+        )
+    }
+
+    if (open && library != null) {
+        // Opened in full, so that the credit below the list is on screen.
+        ModalBottomSheet(
+            onDismissRequest = { open = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            @Composable
+            fun Choice(text: String, reference: Reference?) {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (reference == selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            open = false
+                            onSelect(reference)
+                        }
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                )
+            }
+
+            LazyColumn(Modifier.weight(1f, fill = false)) {
+                item { Choice(stringResource(R.string.reference_none), null) }
+                items(library.items, key = { it.name }) { Choice(it.word.pinyin, it) }
+            }
+            HorizontalDivider()
+            Text(
+                stringResource(R.string.reference_credit),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+            )
+        }
+    }
+}
+
+/** The chart and controls for imitating [reference]: its contour as a ghost under the take's. */
+@Composable
+private fun PracticePanel(
+    reference: Reference,
+    take: Take?,
+    range: PitchRange?,
+    recording: Boolean,
+    playbackMs: Float?,
+    referencePlaybackMs: Float?,
+    onTogglePlayback: () -> Unit,
+    onToggleReferencePlayback: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val overlay = remember(reference, take, range) {
+        if (take != null && range != null) Overlay.of(reference.contour, take.track.contour(range)) else null
+    }
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ChartFrame {
+            OverlayChart(
+                reference = reference.contour,
+                attempt = overlay?.attempt,
+                cursorMs = referencePlaybackMs ?: playbackMs?.let { overlay?.referenceMs(it) },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilledTonalButton(onClick = onToggleReferencePlayback, enabled = !recording) {
+                Text(stringResource(if (referencePlaybackMs == null) R.string.action_listen else R.string.action_stop))
+            }
+            FilledTonalButton(onClick = onTogglePlayback, enabled = take != null) {
+                Text(stringResource(if (playbackMs == null) R.string.action_play else R.string.action_stop))
+            }
+            Text(
+                stringResource(
+                    when {
+                        take == null -> R.string.practice_hint
+                        take.track.voicedFrames == 0 -> R.string.hint_no_pitch
+                        range == null -> R.string.practice_uncalibrated
+                        else -> when (overlay?.similarity?.rating) {
+                            Rating.CLOSE -> R.string.rating_close
+                            Rating.NEAR -> R.string.rating_near
+                            Rating.OFF, null -> R.string.rating_off
+                        }
+                    },
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChartFrame(content: @Composable () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(260.dp),
+        content = content,
+    )
+}
+
 @Composable
 private fun ChartPanel(
     take: Take?,
@@ -237,13 +380,7 @@ private fun ChartPanel(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(260.dp),
-        ) {
+        ChartFrame {
             if (take == null || take.track.voicedFrames == 0) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(

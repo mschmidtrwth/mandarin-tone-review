@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Converts samples/*.mp3 to 16 kHz mono 16-bit WAV with leading and trailing
-# silence trimmed, for use as test fixtures by the :pitch module.
+# silence trimmed. The app bundles them as its reference library and the :pitch
+# tests use them as fixtures.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-out="$root/pitch/src/test/resources/samples"
+out="$root/app/src/main/assets/samples"
 mkdir -p "$out"
 
 # Trim silence below -45 dB at both ends, keeping 50 ms of it as padding.

@@ -11,6 +11,7 @@ import parselmouth
 
 ROOT = Path(__file__).resolve().parent.parent
 RESOURCES = ROOT / "pitch" / "src" / "test" / "resources"
+SAMPLES = ROOT / "app" / "src" / "main" / "assets" / "samples"
 TIME_STEP = 0.01
 PITCH_FLOOR = 60
 PITCH_CEILING = 500
@@ -18,7 +19,7 @@ PITCH_CEILING = 500
 
 def main():
     lines = []
-    for wav in sorted((RESOURCES / "samples").glob("*.wav")):
+    for wav in sorted(SAMPLES.glob("*.wav")):
         pitch = parselmouth.Sound(str(wav)).to_pitch_ac(
             time_step=TIME_STEP, pitch_floor=PITCH_FLOOR, pitch_ceiling=PITCH_CEILING
         )

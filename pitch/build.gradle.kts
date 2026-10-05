@@ -15,6 +15,13 @@ kotlin {
     }
 }
 
+// The sample recordings bundled with the app double as fixtures, read as /samples/<name>.wav.
+sourceSets {
+    test {
+        resources.srcDir("../app/src/main/assets")
+    }
+}
+
 dependencies {
     testImplementation(libs.junit)
 }

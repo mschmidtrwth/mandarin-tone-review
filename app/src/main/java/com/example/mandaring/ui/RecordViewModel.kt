@@ -15,6 +15,8 @@ import com.example.mandaring.audio.Player
 import com.example.mandaring.audio.Recorder
 import com.example.mandaring.data.ProfileStore
 import com.example.mandaring.data.Profiles
+import com.example.mandaring.data.Reference
+import com.example.mandaring.data.ReferenceLibrary
 import com.example.mandaring.data.TakeStore
 import com.example.mandaring.pitch.Audio
 import com.example.mandaring.pitch.PitchAnalyzer
@@ -52,6 +54,12 @@ data class RecordUiState(
     val takes: List<File> = emptyList(),
     /** Playback position within the current take, null when not playing. */
     val playbackMs: Float? = null,
+    /** The bundled recordings, null until they have been analysed. */
+    val library: ReferenceLibrary? = null,
+    /** The recording being practised against, null when recording freely. */
+    val reference: Reference? = null,
+    /** Playback position within [reference], null when not playing. */
+    val referencePlaybackMs: Float? = null,
     /** Non-null while the calibration flow is open. */
     val calibration: CalibrationState? = null,
     @param:StringRes val message: Int? = null,
@@ -72,6 +80,15 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     @Volatile
     private var stopRequested = false
     private var playback: Job? = null
+
+    init {
+        viewModelScope.launch {
+            val started = System.nanoTime()
+            val library = withContext(Dispatchers.Default) { ReferenceLibrary.load(application.assets) }
+            Log.i(TAG, "Analysed ${library.items.size} references in ${(System.nanoTime() - started) / 1_000_000} ms")
+            state = state.copy(library = library)
+        }
+    }
 
     private fun takeStore(profiles: Profiles = state.profiles) =
         TakeStore(File(getApplication<Application>().filesDir, "takes/${profiles.currentId}"))
@@ -158,6 +175,13 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
         profileStore.save(profiles)
     }
 
+    /** Picks the recording to practise against, or none. The take on show belonged to the previous one. */
+    fun selectReference(reference: Reference?) {
+        if (reference == state.reference) return
+        stopPlayback()
+        state = state.copy(reference = reference, current = null, message = null)
+    }
+
     fun select(file: File) {
         stopPlayback()
         viewModelScope.launch {
@@ -188,23 +212,31 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun togglePlayback() {
-        if (playback?.isActive == true) {
-            stopPlayback()
-            return
-        }
-        val take = state.current ?: return
+        val wasPlaying = state.playbackMs != null
+        stopPlayback()
+        val take = state.current
+        if (wasPlaying || take == null) return
         playback = viewModelScope.launch {
-            try {
-                player.play(take.audio) { state = state.copy(playbackMs = it) }
-            } finally {
-                state = state.copy(playbackMs = null)
-            }
+            player.play(take.audio) { state = state.copy(playbackMs = it) }
+            state = state.copy(playbackMs = null)
+        }
+    }
+
+    fun toggleReferencePlayback() {
+        val wasPlaying = state.referencePlaybackMs != null
+        stopPlayback()
+        val reference = state.reference
+        if (wasPlaying || reference == null || state.recording) return
+        playback = viewModelScope.launch {
+            player.play(reference.audio) { state = state.copy(referencePlaybackMs = it) }
+            state = state.copy(referencePlaybackMs = null)
         }
     }
 
     private fun stopPlayback() {
         playback?.cancel()
         playback = null
+        state = state.copy(playbackMs = null, referencePlaybackMs = null)
     }
 
     private fun analyze(file: File, audio: Audio) =

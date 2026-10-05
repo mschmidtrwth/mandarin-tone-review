@@ -26,6 +26,16 @@
     <string name="calibration_speech">Say a full sentence in your normal voice, in any language</string>
     <string name="calibration_retry">Didn\'t catch enough of that, try again a little longer</string>
     <string name="calibration_too_narrow">The low and high notes were too close together</string>
+    <string name="reference_loading">Preparing reference recordings…</string>
+    <string name="reference_choose">Choose a word to practise</string>
+    <string name="reference_none">Free recording</string>
+    <string name="reference_credit">Reference recordings from the Chinese Pronunciation Wiki, © 2015–2026 AllSet Learning, used under CC BY-NC-SA 3.0. Trimmed and resampled for this app.</string>
+    <string name="action_listen">Listen</string>
+    <string name="practice_hint">Listen, then hold the button and repeat</string>
+    <string name="practice_uncalibrated">Calibrate to compare with the reference</string>
+    <string name="rating_close">Close match</string>
+    <string name="rating_near">Getting there</string>
+    <string name="rating_off">Quite different</string>
     <string name="error_microphone">Could not open the microphone</string>
     <string name="error_unreadable">Could not read that recording</string>
 </resources>
