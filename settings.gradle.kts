@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Mandarin Tone Visualizer"
 include(":app")
+include(":pitch")
  
