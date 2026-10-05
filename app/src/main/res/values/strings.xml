@@ -1,3 +1,14 @@
 <resources>
     <string name="app_name">Mandarin Tone Visualizer</string>
+    <string name="hint_empty">Hold the button and say a word</string>
+    <string name="hint_hold">Keep holding the button while you speak</string>
+    <string name="hint_no_pitch">No pitch detected in this recording</string>
+    <string name="record_idle">Hold to record</string>
+    <string name="record_active">Recording…</string>
+    <string name="action_play">Play</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_delete">Delete</string>
+    <string name="duration_seconds">%1$.1f s</string>
+    <string name="error_microphone">Could not open the microphone</string>
+    <string name="error_unreadable">Could not read that recording</string>
 </resources>
