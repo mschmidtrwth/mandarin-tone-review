@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import com.example.mandaring.pitch.Audio
+import com.example.mandaring.pitch.louder
 import kotlinx.coroutines.delay
 
 class Player {
@@ -11,8 +12,10 @@ class Player {
      * Plays [audio] and suspends until it has finished, reporting the playback position.
      * Cancelling the caller stops playback.
      */
-    suspend fun play(audio: Audio, onProgress: (positionMs: Float) -> Unit) {
-        if (audio.samples.isEmpty()) return
+    suspend fun play(recording: Audio, onProgress: (positionMs: Float) -> Unit) {
+        if (recording.samples.isEmpty()) return
+        // Microphone recordings are quiet; only what is played is amplified, never what is stored or analysed.
+        val audio = recording.louder()
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
