@@ -55,4 +55,10 @@
     <string name="train_missed">To work on: %1$s</string>
     <string name="train_again">Train again</string>
     <string name="reference_search">Search pinyin</string>
+    <string name="syllable_close">Close</string>
+    <string name="syllable_near">Near</string>
+    <string name="syllable_off">Off</string>
+    <string name="syllable_heard">Heard %1$s</string>
+    <string name="syllable_too_high">Too high</string>
+    <string name="syllable_too_low">Too low</string>
 </resources>

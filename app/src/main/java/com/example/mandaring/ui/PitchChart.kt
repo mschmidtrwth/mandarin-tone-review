@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.example.mandaring.pitch.Contour
 import com.example.mandaring.pitch.PitchRange
 import com.example.mandaring.pitch.PitchTrack
+import com.example.mandaring.pitch.SyllableScore
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
@@ -89,10 +90,18 @@ fun PitchChart(track: PitchTrack, range: PitchRange?, cursorMs: Float?, modifier
 
 /**
  * An attempt drawn over the faded contour of the [reference] it imitates, on the five tone
- * levels. Both are on the frames of [reference], as is [cursorMs].
+ * levels. Both are on the frames of [reference], as is [cursorMs]. With [syllables] each stretch
+ * of the attempt is coloured by how well it did.
  */
 @Composable
-fun OverlayChart(reference: Contour, attempt: Contour?, cursorMs: Float?, modifier: Modifier = Modifier) {
+fun OverlayChart(
+    reference: Contour,
+    attempt: Contour?,
+    cursorMs: Float?,
+    modifier: Modifier = Modifier,
+    syllables: List<SyllableScore> = emptyList(),
+) {
+    val ratingColors = syllables.map { it.rating.color() }
     val lineColor = MaterialTheme.colorScheme.primary
     val ghostColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
     val bandColor = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -115,7 +124,16 @@ fun OverlayChart(reference: Contour, attempt: Contour?, cursorMs: Float?, modifi
         drawLevelBands(labelWidth, bandColor, textMeasurer, labelStyle) { y(it) }
         drawCurve(reference.size, ghostColor, 12.dp) { point(reference, it) }
         if (attempt != null) {
-            drawCurve(attempt.size, lineColor, 4.dp) { point(attempt, it) }
+            if (syllables.isEmpty()) {
+                drawCurve(attempt.size, lineColor, 4.dp) { point(attempt, it) }
+            } else {
+                syllables.forEachIndexed { index, syllable ->
+                    val span = syllable.span
+                    drawCurve(span.until.coerceAtMost(attempt.size), ratingColors[index], 4.dp) {
+                        if (it < span.from) null else point(attempt, it)
+                    }
+                }
+            }
         }
 
         // An attempt's silence before and after speaking falls outside the reference's time span.

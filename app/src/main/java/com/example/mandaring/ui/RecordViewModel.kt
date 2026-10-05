@@ -22,18 +22,17 @@ import com.example.mandaring.data.Reference
 import com.example.mandaring.data.ReferenceLibrary
 import com.example.mandaring.data.TakeStore
 import com.example.mandaring.pitch.Audio
+import com.example.mandaring.pitch.Comparison
 import com.example.mandaring.pitch.Outcome
 import com.example.mandaring.pitch.PitchAnalyzer
 import com.example.mandaring.pitch.PitchHistogram
 import com.example.mandaring.pitch.PitchRange
 import com.example.mandaring.pitch.PitchTrack
-import com.example.mandaring.pitch.Overlay
 import com.example.mandaring.pitch.Rating
 import com.example.mandaring.pitch.Schedule
 import com.example.mandaring.pitch.Session
 import com.example.mandaring.pitch.WavIo
 import com.example.mandaring.pitch.Word
-import com.example.mandaring.pitch.contour
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -165,12 +164,13 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     private fun recordAttempt(take: Take) {
         val reference = state.reference ?: return
         val range = state.profiles.current.range ?: return
-        val similarity = Overlay.of(reference.contour, take.track.contour(range))?.similarity ?: return
+        val comparison = Comparison.of(reference.contour, reference.spans, take.track, range) ?: return
+        val similarity = comparison.similarity ?: return
         val attempt = Attempt(
             profileId = state.profiles.currentId,
             word = reference.name,
             timeMs = System.currentTimeMillis(),
-            rating = similarity.rating,
+            rating = comparison.rating,
             distance = similarity.distance,
             recording = take.file?.name,
         )

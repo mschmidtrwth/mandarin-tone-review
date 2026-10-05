@@ -5,12 +5,18 @@ import com.example.mandaring.pitch.Audio
 import com.example.mandaring.pitch.Contour
 import com.example.mandaring.pitch.PitchAnalyzer
 import com.example.mandaring.pitch.PitchHistogram
+import com.example.mandaring.pitch.Span
 import com.example.mandaring.pitch.WavIo
 import com.example.mandaring.pitch.Word
 import com.example.mandaring.pitch.contour
+import com.example.mandaring.pitch.syllables
+import com.example.mandaring.pitch.withoutOctaveSlips
 
-/** A bundled recording of a native speaker saying [word]. */
-class Reference(val name: String, val word: Word, val audio: Audio, val contour: Contour)
+/**
+ * A bundled recording of a native speaker saying [word]. [contour] is free of octave slips.
+ * [spans] are its syllables, null if they could not be told apart.
+ */
+class Reference(val name: String, val word: Word, val audio: Audio, val contour: Contour, val spans: List<Span>?)
 
 /**
  * The recordings bundled as assets, shortest words first. They are all by one speaker, whose
@@ -32,7 +38,7 @@ class ReferenceLibrary(val items: List<Reference>) {
                 ?: return ReferenceLibrary(emptyList())
             val items = analysed.map { (item, track) ->
                 val (name, word, audio) = item
-                Reference(name, word, audio, track.contour(range))
+                Reference(name, word, audio, track.withoutOctaveSlips().contour(range), track.syllables(word.syllables.size))
             }
             return ReferenceLibrary(items.sortedWith(compareBy({ it.word.syllables.size }, { it.name })))
         }

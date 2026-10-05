@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -14,10 +15,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -61,16 +66,18 @@ import com.example.mandaring.R
 import com.example.mandaring.data.Profiles
 import com.example.mandaring.data.Reference
 import com.example.mandaring.data.ReferenceLibrary
-import com.example.mandaring.pitch.Overlay
+import com.example.mandaring.pitch.Comparison
 import com.example.mandaring.pitch.PitchRange
 import com.example.mandaring.pitch.Rating
 import com.example.mandaring.pitch.Session
+import com.example.mandaring.pitch.SyllableScore
 import com.example.mandaring.pitch.Word
 import com.example.mandaring.pitch.contour
 import com.example.mandaring.pitch.tones
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -506,9 +513,10 @@ private fun PracticePanel(
     onToggleReferencePlayback: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val overlay = remember(reference, take, range) {
-        if (take != null && range != null) Overlay.of(reference.contour, take.track.contour(range)) else null
+    val comparison = remember(reference, take, range) {
+        if (take != null && range != null) Comparison.of(reference.contour, reference.spans, take.track, range) else null
     }
+    val overlay = comparison?.overlay
     val heard = remember(reference, take, range) {
         if (take != null && range != null) take.track.tones(range, reference.word.syllables.size) else null
     }
@@ -518,6 +526,7 @@ private fun PracticePanel(
             OverlayChart(
                 reference = reference.contour,
                 attempt = overlay?.attempt,
+                syllables = comparison?.syllables.orEmpty(),
                 cursorMs = referencePlaybackMs ?: playbackMs?.let { overlay?.referenceMs(it) },
                 modifier = Modifier
                     .fillMaxSize()
@@ -537,7 +546,7 @@ private fun PracticePanel(
                         take == null -> R.string.practice_hint
                         take.track.voicedFrames == 0 -> R.string.hint_no_pitch
                         range == null -> R.string.practice_uncalibrated
-                        else -> when (overlay?.similarity?.rating) {
+                        else -> when (comparison?.rating) {
                             Rating.CLOSE -> R.string.rating_close
                             Rating.NEAR -> R.string.rating_near
                             Rating.OFF, null -> R.string.rating_off
@@ -547,9 +556,70 @@ private fun PracticePanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (heard != null) HeardTones(reference.word, heard)
+        val syllables = comparison?.syllables.orEmpty()
+        if (syllables.isNotEmpty()) {
+            SyllableFeedback(reference.word, heard, syllables)
+        } else if (heard != null) {
+            HeardTones(reference.word, heard)
+        }
     }
 }
+
+/** A card per syllable of [word]: how close it was, the tone [heard] if that is not the word's, and a pitch that is off. */
+@Composable
+private fun SyllableFeedback(word: Word, heard: List<Int>?, scores: List<SyllableScore>) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        word.syllables.forEachIndexed { index, syllable ->
+            val score = scores[index]
+            val heardTone = heard?.getOrNull(index)?.takeIf { it != word.spokenTones[index] }
+            val height = score.similarity?.heightError ?: 0f
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.weight(1f),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(syllable.pinyin, style = MaterialTheme.typography.titleLarge)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(10.dp)
+                                .background(score.rating.color(), CircleShape),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            stringResource(
+                                when (score.rating) {
+                                    Rating.CLOSE -> R.string.syllable_close
+                                    Rating.NEAR -> R.string.syllable_near
+                                    Rating.OFF -> R.string.syllable_off
+                                },
+                            ),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    if (heardTone != null) {
+                        Text(
+                            stringResource(R.string.syllable_heard, syllable.copy(tone = heardTone).pinyin),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (score.rating != Rating.CLOSE && abs(height) >= HEIGHT_HINT) {
+                        Text(
+                            stringResource(if (height > 0) R.string.syllable_too_high else R.string.syllable_too_low),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** How many tone levels off a syllable has to sit before it is said to be too high or too low. */
+private const val HEIGHT_HINT = 1f
 
 /** [word] written with the tones [heard] in a take; syllables whose tone is not the word's stand out. */
 @Composable

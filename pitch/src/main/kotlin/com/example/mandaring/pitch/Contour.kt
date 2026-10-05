@@ -27,65 +27,115 @@ fun PitchTrack.contour(range: PitchRange): Contour =
  * An attempt laid over a reference recording of the same word.
  *
  * Both are cut down to the stretch from their first to their last voiced frame, and the attempt
- * is stretched linearly so that the two stretches coincide.
+ * is stretched in time so that the two coincide. With the syllables of both given, each syllable
+ * of the attempt is stretched onto its counterpart instead, so that a word said with the right
+ * tones but a different rhythm still lines up.
  *
  * @property attempt the attempt on the frames of [reference]
  */
 class Overlay private constructor(
     val reference: Contour,
     val attempt: Contour,
-    private val attemptStartMs: Float,
-    /** Reference time per unit of attempt time. */
-    private val stretch: Float,
+    private val warp: Warp,
 ) {
     /** Where a moment of the original attempt falls on the time axis of [reference]. */
-    fun referenceMs(attemptMs: Float): Float =
-        reference.firstVoiced * reference.hopMs + (attemptMs - attemptStartMs) * stretch
+    fun referenceMs(attemptMs: Float): Float = warp.toReference(attemptMs / attempt.hopMs) * reference.hopMs
 
-    /** Null if the two are never voiced at the same time. */
-    val similarity: Similarity? = run {
+    /** Over the whole word. Null if the two are never voiced at the same time. */
+    val similarity: Similarity? = similarity(0, reference.size)
+
+    /** Over one syllable of the reference. Null if the two are never voiced at the same time within it. */
+    fun similarity(span: Span): Similarity? = similarity(span.from.coerceAtLeast(0), span.until.coerceAtMost(reference.size))
+
+    private fun similarity(from: Int, until: Int): Similarity? {
         var count = 0
         var sumReference = 0f
         var sumAttempt = 0f
-        for (i in 0 until reference.size) {
-            if (!reference.isVoiced(i) || !attempt.isVoiced(i)) continue
+        var referenceVoiced = 0
+        for (i in from until until) {
+            if (!reference.isVoiced(i)) continue
+            referenceVoiced++
+            if (!attempt.isVoiced(i)) continue
             count++
             sumReference += reference.levels[i]
             sumAttempt += attempt.levels[i]
         }
-        if (count == 0) return@run null
+        if (count == 0) return null
 
         val height = (sumAttempt - sumReference) / count
         var squares = 0f
-        for (i in 0 until reference.size) {
+        for (i in from until until) {
             if (!reference.isVoiced(i) || !attempt.isVoiced(i)) continue
             val difference = attempt.levels[i] - reference.levels[i] - height
             squares += difference * difference
         }
-        Similarity(
+        return Similarity(
             heightError = height,
             shapeError = sqrt(squares / count),
-            coverage = count.toFloat() / reference.levels.count { !it.isNaN() },
+            coverage = count.toFloat() / referenceVoiced,
         )
     }
 
-    companion object {
-        /** Null if either contour has no voiced stretch to align on. */
-        fun of(reference: Contour, attempt: Contour): Overlay? {
-            val referenceSpan = reference.lastVoiced - reference.firstVoiced
-            val attemptSpan = attempt.lastVoiced - attempt.firstVoiced
-            if (referenceSpan <= 0 || attemptSpan <= 0) return null
+    /** Maps frames of the reference to frames of the attempt and back, linearly between matched points. */
+    private class Warp(private val reference: FloatArray, private val attempt: FloatArray) {
+        fun toAttempt(frame: Float) = map(frame, reference, attempt)
 
-            val step = attemptSpan.toFloat() / referenceSpan
-            val levels = FloatArray(reference.size) { i ->
-                attempt.levelAt(attempt.firstVoiced + (i - reference.firstVoiced) * step)
+        fun toReference(frame: Float) = map(frame, attempt, reference)
+
+        /** Beyond the first and last point the nearest stretch is carried on. */
+        private fun map(value: Float, from: FloatArray, to: FloatArray): Float {
+            var segment = 0
+            while (segment < from.size - 2 && value >= from[segment + 1]) segment++
+            val fraction = (value - from[segment]) / (from[segment + 1] - from[segment])
+            return to[segment] + fraction * (to[segment + 1] - to[segment])
+        }
+    }
+
+    companion object {
+        /**
+         * Null if either contour has no voiced stretch to align on.
+         *
+         * @param referenceSpans the syllables of [reference], and [attemptSpans] those of [attempt];
+         * both are needed, and the same number of them, to line the syllables up one by one
+         */
+        fun of(
+            reference: Contour,
+            attempt: Contour,
+            referenceSpans: List<Span>? = null,
+            attemptSpans: List<Span>? = null,
+        ): Overlay? {
+            if (reference.lastVoiced - reference.firstVoiced <= 0 || attempt.lastVoiced - attempt.firstVoiced <= 0) {
+                return null
             }
-            return Overlay(
-                reference = reference,
-                attempt = Contour(reference.hopMs, levels),
-                attemptStartMs = attempt.firstVoiced * attempt.hopMs,
-                stretch = reference.hopMs / (step * attempt.hopMs),
+
+            val points = mutableListOf(reference.firstVoiced to attempt.firstVoiced)
+            if (referenceSpans != null && attemptSpans != null && referenceSpans.size == attemptSpans.size) {
+                for (index in referenceSpans.indices) {
+                    val inReference = reference.voicedExtent(referenceSpans[index]) ?: continue
+                    val inAttempt = attempt.voicedExtent(attemptSpans[index]) ?: continue
+                    points += inReference.first to inAttempt.first
+                    points += inReference.last to inAttempt.last
+                }
+            }
+            points += reference.lastVoiced to attempt.lastVoiced
+            // Both axes must keep moving forward, which drops anything that doubles back or repeats.
+            val matched = mutableListOf(points.first())
+            for (point in points.drop(1)) {
+                if (point.first > matched.last().first && point.second > matched.last().second) matched += point
+            }
+
+            val warp = Warp(
+                FloatArray(matched.size) { matched[it].first.toFloat() },
+                FloatArray(matched.size) { matched[it].second.toFloat() },
             )
+            val levels = FloatArray(reference.size) { attempt.levelAt(warp.toAttempt(it.toFloat())) }
+            return Overlay(reference, Contour(reference.hopMs, levels), warp)
+        }
+
+        /** First and last voiced frame within [span], null unless they are two different frames. */
+        private fun Contour.voicedExtent(span: Span): IntRange? {
+            val frames = (span.from.coerceAtLeast(0) until span.until.coerceAtMost(size)).filter { isVoiced(it) }
+            return if (frames.size >= 2) frames.first()..frames.last() else null
         }
 
         /** Level at a fractional frame, NaN unless the frames either side of it are voiced. */
